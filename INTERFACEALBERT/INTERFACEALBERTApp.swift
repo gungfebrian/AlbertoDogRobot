@@ -474,10 +474,27 @@ struct CmdGrid: View {
 }
 
 // =====================================================================
-// MARK: - ContentView (the main screen)
+// MARK: - ContentView (tab shell: Dashboard + Controller pages)
 // =====================================================================
 struct ContentView: View {
     @StateObject private var ble = BLEManager()
+
+    var body: some View {
+        TabView {
+            DashboardView(ble: ble)
+                .tabItem { Label("Albert", systemImage: "face.smiling") }
+            ControllerView(ble: ble)
+                .tabItem { Label("Control", systemImage: "gamecontroller.fill") }
+        }
+        .preferredColorScheme(.dark)
+    }
+}
+
+// =====================================================================
+// MARK: - DashboardView (the original main screen)
+// =====================================================================
+struct DashboardView: View {
+    @ObservedObject var ble: BLEManager
     @State private var statusPoll: Timer?
     @State private var showAllControls = false
 
@@ -860,6 +877,273 @@ struct ContentView: View {
         ble.requestStatus()
         statusPoll = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { _ in
             ble.requestStatus()
+        }
+    }
+}
+
+// =====================================================================
+// MARK: - ControllerView (PlayStation-style manual control page)
+// =====================================================================
+
+/// Analog-style stick. Drag it around: the direction zone maps to a
+/// drive command; releasing snaps back to center and sends STOP.
+struct JoystickPad: View {
+    /// Called with "WALK" / "BACK" / "LEFT" / "RIGHT" while dragging,
+    /// and nil when the stick is released.
+    let onZone: (String?) -> Void
+
+    @State private var drag: CGSize = .zero
+    @State private var zone: String? = nil
+
+    private let baseSize: CGFloat = 180
+    private let thumbSize: CGFloat = 72
+    private let maxRadius: CGFloat = 58
+    private let deadZone: CGFloat = 22
+
+    var body: some View {
+        ZStack {
+            // base plate with direction arrows
+            Circle()
+                .fill(Color.white.opacity(0.06))
+                .overlay(Circle().stroke(Color.white.opacity(0.14), lineWidth: 1.5))
+            Group {
+                arrow("arrowtriangle.up.fill").offset(y: -baseSize/2 + 16)
+                arrow("arrowtriangle.down.fill").offset(y: baseSize/2 - 16)
+                arrow("arrowtriangle.left.fill").offset(x: -baseSize/2 + 16)
+                arrow("arrowtriangle.right.fill").offset(x: baseSize/2 - 16)
+            }
+            // thumb stick
+            Circle()
+                .fill(zone == nil ? AlbertPalette.cardHi : AlbertMood.neutral.accent.opacity(0.85))
+                .frame(width: thumbSize, height: thumbSize)
+                .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 2))
+                .shadow(color: .black.opacity(0.4), radius: 6, y: 3)
+                .offset(drag)
+                .animation(.spring(response: 0.25, dampingFraction: 0.6), value: drag)
+        }
+        .frame(width: baseSize, height: baseSize)
+        .contentShape(Circle())
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { g in
+                    // clamp the thumb inside the base circle
+                    let dx = g.translation.width, dy = g.translation.height
+                    let dist = max(1, sqrt(dx*dx + dy*dy))
+                    let clamped = min(dist, maxRadius)
+                    drag = CGSize(width: dx / dist * clamped, height: dy / dist * clamped)
+
+                    // outside the dead zone: pick a direction by angle
+                    let newZone: String?
+                    if clamped < deadZone {
+                        newZone = nil
+                    } else {
+                        let angle = atan2(dy, dx) * 180 / .pi   // 0° = right, y down
+                        switch angle {
+                        case -135 ..< -45: newZone = "WALK"
+                        case  -45 ..<  45: newZone = "RIGHT"
+                        case   45 ..< 135: newZone = "BACK"
+                        default:           newZone = "LEFT"
+                        }
+                    }
+                    if newZone != zone {
+                        zone = newZone
+                        UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
+                        onZone(newZone)
+                    }
+                }
+                .onEnded { _ in
+                    drag = .zero
+                    if zone != nil {
+                        zone = nil
+                        onZone(nil)
+                    }
+                }
+        )
+    }
+
+    private func arrow(_ name: String) -> some View {
+        Image(systemName: name)
+            .font(.system(size: 13, weight: .bold))
+            .foregroundColor(AlbertPalette.subtle)
+    }
+}
+
+/// Press-and-hold button: sends a command on press, STOP on release.
+/// Used for the spin "shoulder buttons".
+struct HoldButton: View {
+    let title: String
+    let icon: String
+    let command: String
+    let send: (String) -> Void
+
+    @State private var held = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon).font(.system(size: 14, weight: .bold))
+            Text(title).font(.system(size: 13, weight: .heavy, design: .rounded))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+        .background(
+            Capsule().fill(held ? AlbertMood.excited.accent.opacity(0.7)
+                                : AlbertPalette.cardHi)
+        )
+        .foregroundColor(.white)
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    if !held {
+                        held = true
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        send(command)
+                    }
+                }
+                .onEnded { _ in
+                    held = false
+                    send("STOP")
+                }
+        )
+    }
+}
+
+/// The PlayStation-style action diamond: four round buttons
+/// (top / right / bottom / left) firing the current emotion bank.
+struct EmotionDiamond: View {
+    let items: [(cmd: String, icon: String, color: Color)]   // exactly 4
+    let send: (String) -> Void
+
+    var body: some View {
+        ZStack {
+            diamondButton(items[0]).offset(y: -58)
+            diamondButton(items[1]).offset(x: 58)
+            diamondButton(items[2]).offset(y: 58)
+            diamondButton(items[3]).offset(x: -58)
+        }
+        .frame(width: 180, height: 180)
+    }
+
+    private func diamondButton(_ item: (cmd: String, icon: String, color: Color)) -> some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            send(item.cmd)
+        } label: {
+            VStack(spacing: 3) {
+                Image(systemName: item.icon)
+                    .font(.system(size: 20, weight: .bold))
+                Text(item.cmd)
+                    .font(.system(size: 8, weight: .heavy, design: .rounded))
+            }
+            .frame(width: 62, height: 62)
+            .background(Circle().fill(item.color.opacity(0.32)))
+            .overlay(Circle().stroke(item.color.opacity(0.8), lineWidth: 2))
+            .foregroundColor(.white)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct ControllerView: View {
+    @ObservedObject var ble: BLEManager
+    @State private var bank = 0
+
+    private var mood: AlbertMood { AlbertMood.from(ble.stats) }
+
+    // the emotion switch: three swappable banks for the action diamond,
+    // each in PS order (top, right, bottom, left)
+    private let banks: [[(cmd: String, icon: String, color: Color)]] = [
+        [("HAPPY",     "sun.max.fill",       AlbertMood.happy.accent),
+         ("LOVE",      "heart.fill",         AlbertMood.love.accent),
+         ("CUTE",      "sparkles",           AlbertMood.excited.accent),
+         ("LAUGH",     "face.smiling",       AlbertMood.neutral.accent)],
+        [("GRUMPY",    "cloud.bolt.fill",    AlbertMood.grumpy.accent),
+         ("ANGRY",     "flame.fill",         AlbertMood.angry.accent),
+         ("FURIOUS",   "flame.circle.fill",  AlbertMood.furious.accent),
+         ("POUT",      "cloud.drizzle.fill", AlbertMood.sad.accent)],
+        [("SURPRISED", "exclamationmark",    AlbertMood.surprised.accent),
+         ("SAD",       "cloud.rain",         AlbertMood.sad.accent),
+         ("SLEEPY",    "moon.zzz.fill",      AlbertMood.sleepy.accent),
+         ("SUS",       "eyes",               AlbertMood.suspicious.accent)],
+    ]
+    private let bankNames = ["Sunny", "Grumpy", "Drama"]
+
+    var body: some View {
+        ZStack {
+            LinearGradient(colors: [AlbertPalette.bg, AlbertPalette.bg2],
+                           startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea()
+
+            VStack(spacing: 18) {
+                // header with connection state
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Controller")
+                            .font(.system(size: 26, weight: .black, design: .rounded))
+                            .foregroundColor(.white)
+                        Text(ble.isConnected ? "Drive me!" : ble.statusText)
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundColor(mood.accent)
+                    }
+                    Spacer()
+                    Circle()
+                        .fill(ble.isConnected ? Color.green : Color.gray)
+                        .frame(width: 12, height: 12)
+                        .shadow(color: ble.isConnected ? .green : .clear, radius: 6)
+                }
+
+                if !ble.isConnected {
+                    Spacer()
+                    Text("Connect on the Albert tab first")
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        .foregroundColor(AlbertPalette.subtle)
+                    CmdButton(title: ble.isScanning ? "Scanning…" : "Scan & Connect",
+                              icon: "antenna.radiowaves.left.and.right",
+                              tint: mood.accent.opacity(0.85), big: true) {
+                        ble.startScan()
+                    }
+                    Spacer()
+                } else {
+                    // shoulder buttons: hold to spin
+                    HStack(spacing: 12) {
+                        HoldButton(title: "SPIN L", icon: "arrow.counterclockwise",
+                                   command: "SL", send: { ble.send($0) })
+                        HoldButton(title: "SPIN R", icon: "arrow.clockwise",
+                                   command: "SR", send: { ble.send($0) })
+                    }
+
+                    Spacer()
+
+                    // the main deck: stick drives, diamond emotes
+                    HStack(alignment: .center) {
+                        JoystickPad { zone in
+                            ble.send(zone ?? "STOP")
+                        }
+                        Spacer(minLength: 12)
+                        EmotionDiamond(items: banks[bank], send: { ble.send($0) })
+                    }
+
+                    // emotion switch between the banks
+                    Picker("Mood set", selection: $bank) {
+                        ForEach(0..<3, id: \.self) { i in
+                            Text(bankNames[i]).tag(i)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    Spacer()
+
+                    // utility row
+                    HStack(spacing: 8) {
+                        CmdButton(title: "STAND", icon: "arrow.up.to.line") { ble.send("UP") }
+                        CmdButton(title: "SIT", icon: "chair") { ble.send("SIT") }
+                        CmdButton(title: "STOP", icon: "stop.fill",
+                                  tint: Color(red: 0.9, green: 0.35, blue: 0.35).opacity(0.8)) {
+                            ble.send("STOP")
+                        }
+                    }
+                }
+            }
+            .padding(20)
         }
     }
 }
