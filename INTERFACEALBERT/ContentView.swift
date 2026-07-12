@@ -24,7 +24,7 @@ struct INTERFACEALBERTApp: App {
 }
 
 // Live telemetry parsed from the robot's STATUS reply, e.g.
-// "H:60 E:70 B:0 Bond:0 pets:0 age:1"
+// "H:60 E:70 B:0 Bond:0 pets:0 age:1 act:zoomies!"
 struct PetStats: Equatable {
     var happiness: Int
     var energy: Int
@@ -32,21 +32,27 @@ struct PetStats: Equatable {
     var bonding: Int
     var pets: Int
     var age: Int
+    var activity: String = ""   // current autopilot activity name
 
     /// Parse the firmware STATUS string. Returns nil if it isn't one.
     static func parse(_ s: String) -> PetStats? {
         guard s.contains("H:"), s.contains("Bond:") else { return nil }
         var map: [String: Int] = [:]
+        var activity = ""
         for token in s.split(separator: " ") {
             let parts = token.split(separator: ":")
-            if parts.count == 2, let value = Int(parts[1]) {
+            guard parts.count == 2 else { continue }
+            if let value = Int(parts[1]) {
                 map[String(parts[0])] = value
+            } else if parts[0] == "act" {
+                activity = String(parts[1])
             }
         }
         guard let h = map["H"], let e = map["E"],
               let b = map["B"], let bond = map["Bond"] else { return nil }
         return PetStats(happiness: h, energy: e, boredom: b, bonding: bond,
-                        pets: map["pets"] ?? 0, age: map["age"] ?? 0)
+                        pets: map["pets"] ?? 0, age: map["age"] ?? 0,
+                        activity: activity)
     }
 }
 
@@ -91,7 +97,12 @@ class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeriph
         isScanning = false
     }
 
+    /// True while the user explicitly asked to disconnect — suppresses
+    /// the automatic reconnect.
+    private var userDisconnected = false
+
     func disconnect() {
+        userDisconnected = true
         if let p = peripheral {
             centralManager.cancelPeripheralConnection(p)
         }
@@ -136,6 +147,7 @@ class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeriph
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         isConnected = true
+        userDisconnected = false
         statusText = "Connected to \(peripheral.name ?? "AlbertMini")"
         peripheral.discoverServices([BLEManager.serviceUUID])
     }
@@ -144,11 +156,21 @@ class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeriph
         isConnected = false
         rxCharacteristic = nil
         stats = nil
-        statusText = "Disconnected"
+        if userDisconnected {
+            statusText = "Disconnected"
+        } else {
+            // dropped link (robot rebooted, out of range): quietly rescan
+            statusText = "Connection lost — reconnecting…"
+            startScan()
+        }
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
         statusText = "Failed to connect: \(error?.localizedDescription ?? "unknown error")"
+        if !userDisconnected {
+            // keep the auto-reconnect promise: go back to scanning
+            startScan()
+        }
     }
 
     // ---------------- CBPeripheralDelegate ----------------

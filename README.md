@@ -76,7 +76,9 @@ and Albert (advertising as `AlbertMini`) will be found within a second or two.
 
 ## The app
 
-The app has two pages, switched with the tab bar at the bottom.
+The app has three pages, switched with the tab bar at the bottom. If the
+Bluetooth link drops (robot rebooted, walked out of range), the app quietly
+rescans and reconnects by itself.
 
 ### Albert tab — the dashboard
 
@@ -84,20 +86,26 @@ This is the "living with Albert" page. The big card is his face, mirrored live
 from the robot: it blinks, breathes, glances around, and switches expression
 based on the mood telemetry the robot reports every three seconds. When he is
 grumpy you get the anger mark in the top-left corner of the card, same as on
-his OLED. Tap the face to pet him.
+his OLED. Tap the face to pet him. The header shows his mood and what he is
+currently doing ("Happy · ZOOMIES!"), and the mood card shows the last thing
+he said over Bluetooth.
 
 Below the face:
 
 | Section | What you get |
 |---|---|
-| Mood bars | Live happiness, energy and bonding, plus lifetime pets and age |
+| Mood bars | Live happiness, energy and bonding, plus lifetime pets, age, and his last message |
+| Autopilot | Free Roam hands control to his brain; or pick one of seven activity chips (Chill, Explore, Play, Cuddle, Groom, Zoomies, Show off) to lock him into that activity. The active one is highlighted live. |
 | Shows | The four big performances: INTRO, 5G GACOR, TEAM, PARTY — the words flash on the app face in sync with his OLED |
 | Move | A d-pad for walking, turning, spinning, and stop |
-| Poses | Stand, sit, lie, full laydown, rest, sleep |
-| Tricks | Eighteen of them, from pushups to playing dead |
-| Dances | Fifteen, including breakdance, disco, robot and ballet |
-| Feelings | Fifteen expressions — pressing one also flips the app face immediately so you see what you asked for |
-| System | Auto mode, sleep, stats, reset (with a confirmation — it wipes his memory), disconnect |
+
+### Actions tab — the command library
+
+Everything else lives here, organised by a category switch: Poses, Tricks,
+Dances, Feelings, System. Each category is colour-coded, and a compact live
+face sits at the top so Feelings buttons give instant visual feedback. System
+holds auto, sleep, stats, save, reset (with a confirmation — it wipes his
+memory) and disconnect.
 
 ### Control tab — the controller
 
@@ -178,7 +186,7 @@ of them back to back, and closes with a flashing YEAY.
 
 | Command | The performance |
 |---|---|
-| `INTRO` | HI — AKU — ALBERT on screen, a bow of words, then a wave |
+| `INTRO` | HI! — I'M — ALBERTO on screen, a bow of words, then a wave |
 | `GACOR` | Eye intro, a spin, then 5G / GACOR! flashing while he bounces |
 | `TEAM` | Roll call — GUNG, MAYUN, GABBY, ABUI, TIO — three times with a cha-cha step per name |
 | `DEMO` | A guided tour of every facial expression |
@@ -201,7 +209,8 @@ throbbing in both corners.
 | Command | Action |
 |---|---|
 | `LOOKUP` `LOOKDOWN` `LOOKLEFT` `LOOKRIGHT` | Point the eyes |
-| `AUTO` | Hand control back to his own brain |
+| `AUTO` | Hand control back to his own brain (free roam) |
+| `AUTO CHILL/EXPLORE/PLAY/SEEK/GROOM/ZOOM/SHOW` | Auto mode locked to one activity |
 | `PET` | Same as petting the touch pad |
 | `STATUS` | One-line telemetry: happiness, energy, boredom, bonding, pets, age, current activity |
 | `STATS` | Draw the stats screen on his OLED |

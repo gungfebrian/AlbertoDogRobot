@@ -343,6 +343,43 @@ public:
     roboEyes.setIdleMode(OFF, 0, 0);
     setOverlay(OV_RAGE);
   }
+  // excited: big bright eyes, rapid blinking, exclamation burst
+  void excited() {
+    base(); roboEyes.setMood(HAPPY);
+    roboEyes.setWidth(42, 42);
+    roboEyes.setHeight(44, 44);
+    roboEyes.setAutoblinker(ON, 1, 1);
+    roboEyes.setIdleMode(ON, 1, 1);
+    setOverlay(OV_EXCLAIM, 1500);
+  }
+  // bored: flat half-lidded stare drifting downward
+  void bored() {
+    clearOverlay(); base();
+    roboEyes.setMood(DEFAULT);
+    roboEyes.setHeight(12, 12);
+    roboEyes.setPosition(POS_S);
+    roboEyes.setAutoblinker(ON, 5, 3);
+    roboEyes.setIdleMode(OFF, 0, 0);
+  }
+  // dizzy: small wobbly eyes, question mark, confused shake
+  void dizzy() {
+    base(); roboEyes.setMood(DEFAULT);
+    roboEyes.setWidth(24, 24);
+    roboEyes.setHeight(24, 24);
+    roboEyes.setAutoblinker(OFF, 0, 0);
+    setOverlay(OV_QUESTION, 2500);
+    roboEyes.anim_confused();
+  }
+  // proud: tall bright eyes, chin up, slow satisfied blinks
+  void proud() {
+    clearOverlay(); base();
+    roboEyes.setMood(HAPPY);
+    roboEyes.setHeight(44, 44);
+    roboEyes.setPosition(POS_N);
+    roboEyes.setAutoblinker(ON, 4, 2);
+    roboEyes.setIdleMode(OFF, 0, 0);
+  }
+
   // pout: droopy sad eyes looking down with a tear
   void pouty() {
     base(); roboEyes.setMood(TIRED);
@@ -762,6 +799,7 @@ public:
 
   void bounce() {
     face.happy();
+    if (!face.banner("BOING!", nullptr, 400, 3)) return;
     static const Beat b[] = {
       { CENTER+45, CENTER-45, CENTER+45, CENTER-45, 8,  60 },
       { CENTER,    CENTER,    CENTER,    CENTER,    8, 120 },
@@ -785,6 +823,7 @@ public:
   // waves the FRONT-RIGHT leg
   void wave() {
     face.cute();
+    if (!face.banner("HALO!", nullptr, 450, 3)) return;
     motion.setTargets(CENTER, CENTER, CENTER-35, CENTER+35);
     if (!motion.moveSteps(25)) return;
     for (int i = 0; i < 4; i++) {
@@ -798,6 +837,7 @@ public:
 
   void shake() {
     face.surprised();
+    if (!face.banner("BRRR!", nullptr, 350, 3)) return;
     static const Beat b[] = {
       { CENTER+18, CENTER-18, CENTER-18, CENTER+18, 5, 35 },
       { CENTER-18, CENTER+18, CENTER+18, CENTER-18, 5, 35 },
@@ -849,6 +889,7 @@ public:
 
   void yes() {
     face.happy();
+    if (!face.banner("YES!", nullptr, 400, 4)) return;
     static const Beat b[] = {
       { CENTER+35, CENTER-35, CENTER, CENTER, 14, 60 },
       { CENTER,    CENTER,    CENTER, CENTER, 14, 60 },
@@ -859,6 +900,7 @@ public:
 
   void no() {
     face.angry();
+    if (!face.banner("NO!", nullptr, 400, 4)) return;
     static const Beat b[] = {
       { CENTER+25, CENTER+25, CENTER-25, CENTER-25, 12, 60 },
       { CENTER-25, CENTER-25, CENTER+25, CENTER+25, 12, 60 },
@@ -904,8 +946,9 @@ public:
                       CENTER+STRETCH, CENTER-STRETCH);               // FLOP
     if (!motion.moveSteps(12)) return;
     face.eyesShut();
-    if (!motion.holdMs(2200)) return;
-    face.eyesOpen(42);                                               // alive!
+    if (!face.banner("X   X", nullptr, 2200, 3)) return;             // very dead
+    if (!face.banner("BOO!", nullptr, 400, 4)) return;               // alive!
+    face.eyesOpen(42);
     face.setOverlay(OV_EXCLAIM, 600);
     motion.stand(); face.happy(); face.laughBurst(); done();
   }
@@ -947,8 +990,7 @@ public:
   // ZOOMIES: sudden burst of chaotic energy — sprints and spins
   void zoomies() {
     face.surprised();
-    face.setOverlay(OV_EXCLAIM, 600);
-    if (!motion.holdMs(400)) return;
+    if (!face.banner("ZOOM", "ZOOM!", 450, 3, 3)) return;
     face.dancing();
     if (!motion.gaitFor(Gaits::FWD,   900, 1.8f)) return;
     if (!motion.gaitFor(Gaits::SPINL, 700, 1.8f)) return;
@@ -971,8 +1013,9 @@ public:
     if (!motion.playBeats(stomps, 2, 8)) return;
     motion.setTargets(CENTER-60, CENTER+60, CENTER+60, CENTER-60);   // hmph!
     if (!motion.moveSteps(9)) return;
+    if (!face.banner("HMPH!", nullptr, 700, 3)) return;
     face.grumpy();
-    if (!motion.holdMs(1500)) return;
+    if (!motion.holdMs(1200)) return;
     motion.stand(); face.suspicious();
     if (!motion.holdMs(600)) return;
     done();
@@ -1339,7 +1382,7 @@ void perfIntro() {
   // the words, one per beat, with a tiny body bob on each.
   // TEXT STATE: eyes off while the words show — no overlap.
   face.textOnly = true;
-  const char* words[] = { "HI", "AKU", "ALBERT" };
+  const char* words[] = { "HI!", "I'M", "ALBERTO" };
   for (int i = 0; i < 3; i++) {
     if (!face.banner(words[i], nullptr, 650, i == 2 ? 3 : 4)) { face.textOnly = false; return; }
     motion.setTargets(CENTER+15, CENTER-15, CENTER+15, CENTER-15);
@@ -1373,6 +1416,10 @@ void demoExpressions() {
   face.grumpy();     if (!motion.holdMs(900)) return;
   face.furious();    if (!motion.holdMs(900)) return;
   face.pouty();      if (!motion.holdMs(900)) return;
+  face.excited();    if (!motion.holdMs(900)) return;
+  face.bored();      if (!motion.holdMs(900)) return;
+  face.dizzy();      if (!motion.holdMs(1100)) return;
+  face.proud();      if (!motion.holdMs(900)) return;
   face.tired();      if (!motion.holdMs(700)) return;
   face.surprised();  if (!motion.holdMs(900)) return;
   face.suspicious(); if (!motion.holdMs(700)) return;
@@ -1532,7 +1579,18 @@ public:
   enum Activity { CHILL, EXPLORE, PLAY, SEEKATT, GROOM, ZOOM, SHOWOFF };
   static const int N_ACTIVITIES = 7;
 
-  void start() { pickActivity(); }
+  void start() { _locked = false; pickActivity(); }
+
+  // AUTO with options: lock him into one activity — he keeps doing
+  // actions from that activity only, until AUTO (free roam) or a
+  // manual command changes things.
+  void startLocked(Activity a) {
+    _locked = true;
+    _act = a;
+    _nextAction = millis() + random(500, 1500);
+    Serial.print("[auto] locked activity: ");
+    Serial.println(activityName());
+  }
 
   const char* activityName() {
     switch (_act) {
@@ -1549,7 +1607,7 @@ public:
 
   void tick() {
     microIdle();
-    if (millis() > _actUntil)   pickActivity();
+    if (!_locked && millis() > _actUntil) pickActivity();
     if (millis() > _nextAction) doAction();
   }
 
@@ -1588,9 +1646,15 @@ public:
 
 private:
   Activity _act = CHILL;
+  bool _locked = false;
   unsigned long _actUntil = 0, _nextAction = 0, _nextMicro = 0, _lastDrive = 0;
 
   void pickActivity() {
+    if (_locked) {   // locked: keep the same activity, just re-arm timers
+      _actUntil   = millis() + 60000;
+      _nextAction = millis() + random(800, 3500);
+      return;
+    }
     // WILDCARD: 30% of the time ignore mood entirely and pick a totally
     // random activity — keeps auto mode surprising instead of predictable.
     if (random(0, 100) < 30) {
@@ -1643,12 +1707,16 @@ private:
       motion.holdMs(600);
       face.gaze(POS_CENTER);
     } else if (p < 9) {                             // random mood flash
-      switch (random(0, 6)) {
+      switch (random(0, 10)) {
         case 0: face.grumpy();    break;
         case 1: face.surprised(); break;
         case 2: face.cute();      break;
         case 3: face.suspicious();break;
         case 4: face.pouty();     break;
+        case 5: face.excited();   break;
+        case 6: face.bored();     break;
+        case 7: face.dizzy();     break;
+        case 8: face.proud();     break;
         default: face.love();     break;
       }
       motion.holdMs(random(900, 1800));
@@ -1964,6 +2032,10 @@ void handleCommand(String input) {
   else if (input == "GRUMPY")    { currentMode = MODE_IDLE; face.grumpy();     }
   else if (input == "FURIOUS")   { currentMode = MODE_IDLE; face.furious();    }
   else if (input == "POUT")      { currentMode = MODE_IDLE; face.pouty();      }
+  else if (input == "EXCITED")   { currentMode = MODE_IDLE; face.excited();    }
+  else if (input == "BORED")     { currentMode = MODE_IDLE; face.bored();      }
+  else if (input == "DIZZY")     { currentMode = MODE_IDLE; face.dizzy();      }
+  else if (input == "PROUD")     { currentMode = MODE_IDLE; face.proud();      }
   else if (input == "TIRED")     { currentMode = MODE_IDLE; face.tired();      }
   else if (input == "SLEEPY")    { currentMode = MODE_IDLE; face.sleepy();     }
   else if (input == "SURPRISED") { currentMode = MODE_IDLE; face.surprised();  }
@@ -1990,6 +2062,21 @@ void handleCommand(String input) {
 
   // ---- autonomy / system ----
   else if (input == "AUTO")   { currentMode = MODE_AUTO; face.moodFace(); pilot.start(); }
+  else if (input.startsWith("AUTO ")) {           // AUTO with a locked activity
+    String a = input.substring(5); a.trim();
+    AutoPilot::Activity act = AutoPilot::CHILL;
+    bool known = true;
+    if      (a == "CHILL")   act = AutoPilot::CHILL;
+    else if (a == "EXPLORE") act = AutoPilot::EXPLORE;
+    else if (a == "PLAY")    act = AutoPilot::PLAY;
+    else if (a == "SEEK")    act = AutoPilot::SEEKATT;
+    else if (a == "GROOM")   act = AutoPilot::GROOM;
+    else if (a == "ZOOM")    act = AutoPilot::ZOOM;
+    else if (a == "SHOW")    act = AutoPilot::SHOWOFF;
+    else known = false;
+    if (known) { currentMode = MODE_AUTO; face.moodFace(); pilot.startLocked(act); }
+    else       { bleSend("? unknown auto activity"); }
+  }
   else if (input == "PET")    { touchpad.pet(); }
   else if (input == "STATUS") { sendStatus(); }
   else if (input == "SAVE")  { brain.save(); bleSend("saved"); }

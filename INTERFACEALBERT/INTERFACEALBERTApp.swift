@@ -21,7 +21,8 @@ import CoreBluetooth
 /// firmware's mood-face logic so the on-screen eyes match the robot.
 enum AlbertMood: String {
     case sleepy, happy, love, tired, angry, grumpy, furious,
-         surprised, sad, suspicious, neutral, excited
+         surprised, sad, suspicious, neutral, excited,
+         bored, dizzy, proud
 
     /// Same priority ladder the firmware uses in moodFace().
     static func from(_ s: PetStats?) -> AlbertMood {
@@ -49,6 +50,9 @@ enum AlbertMood: String {
         case .suspicious: return "Curious"
         case .neutral:    return "Content"
         case .excited:    return "Excited"
+        case .bored:      return "Bored"
+        case .dizzy:      return "Dizzy"
+        case .proud:      return "Proud"
         }
     }
 
@@ -66,6 +70,9 @@ enum AlbertMood: String {
         case .suspicious: return Color(red: 0.55, green: 0.75, blue: 0.95)
         case .neutral:    return Color(red: 0.45, green: 0.70, blue: 0.95)
         case .excited:    return Color(red: 0.98, green: 0.75, blue: 0.35)
+        case .bored:      return Color(red: 0.55, green: 0.58, blue: 0.65)
+        case .dizzy:      return Color(red: 0.72, green: 0.55, blue: 0.95)
+        case .proud:      return Color(red: 0.95, green: 0.80, blue: 0.30)
         }
     }
 }
@@ -180,6 +187,10 @@ struct RoboEyesView: View {
         case .furious: return 36
         case .sad: return 30
         case .surprised: return 72
+        case .bored: return 16
+        case .dizzy: return 34
+        case .proud: return 70
+        case .excited: return 68 + pulse * 4
         case .love:   return 66 + pulse * 6
         default:      return 64
         }
@@ -206,17 +217,23 @@ struct RoboEyesView: View {
         default:       return 0
         }
     }
-    // grumpy looks away, sad looks down
+    // grumpy looks away, sad and bored look down, proud looks up
     private var moodShift: CGSize {
         switch mood {
         case .grumpy: return CGSize(width: -12, height: 4)
         case .sad:    return CGSize(width: 0,   height: 12)
+        case .bored:  return CGSize(width: 0,   height: 10)
+        case .proud:  return CGSize(width: 0,   height: -8)
         default:      return .zero
         }
     }
-    // furious eyes seethe side-to-side
+    // furious eyes seethe, dizzy eyes wobble
     private var shakeX: CGFloat {
-        mood == .furious ? (pulse * 6 - 3) : 0
+        switch mood {
+        case .furious: return pulse * 6 - 3
+        case .dizzy:   return pulse * 10 - 5
+        default:       return 0
+        }
     }
 
     var body: some View {
@@ -287,6 +304,16 @@ struct RoboEyesView: View {
                 .font(.system(size: 16))
                 .offset(x: -52, y: pulse * 8)
                 .opacity(0.85)
+        case .dizzy:
+            Text("?")
+                .font(.system(size: 30, weight: .black, design: .rounded))
+                .foregroundColor(mood.accent)
+                .rotationEffect(.degrees(pulse * 20 - 10))
+        case .proud:
+            Image(systemName: "crown.fill")
+                .foregroundColor(mood.accent)
+                .font(.system(size: 18))
+                .opacity(0.9)
         default:
             EmptyView()
         }
@@ -341,6 +368,18 @@ enum AlbertPalette {
 // =====================================================================
 // MARK: - Reusable command button
 // =====================================================================
+
+/// Buttons squash slightly while pressed — makes the whole app feel
+/// tactile, like real controller buttons.
+struct SquishStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.92 : 1)
+            .opacity(configuration.isPressed ? 0.8 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
 struct CmdButton: View {
     let title: String
     var icon: String? = nil
@@ -371,7 +410,7 @@ struct CmdButton: View {
             )
             .foregroundColor(AlbertPalette.text)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SquishStyle())
     }
 }
 
@@ -450,7 +489,7 @@ struct DPad: View {
                 .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(tint))
                 .foregroundColor(.white)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SquishStyle())
     }
 }
 
@@ -461,11 +500,13 @@ struct CmdGrid: View {
     let commands: [(String, String)]   // (label, icon)
     let send: (String) -> Void
     var columns: Int = 3
+    var tint: Color = AlbertPalette.cardHi   // per-category colour coding
     var body: some View {
         let cols = Array(repeating: GridItem(.flexible(), spacing: 8), count: columns)
         LazyVGrid(columns: cols, spacing: 8) {
             ForEach(commands, id: \.0) { cmd in
-                CmdButton(title: cmd.0, icon: cmd.1.isEmpty ? nil : cmd.1) {
+                CmdButton(title: cmd.0, icon: cmd.1.isEmpty ? nil : cmd.1,
+                          tint: tint) {
                     send(cmd.0)
                 }
             }
@@ -485,6 +526,8 @@ struct ContentView: View {
                 .tabItem { Label("Albert", systemImage: "face.smiling") }
             ControllerView(ble: ble)
                 .tabItem { Label("Control", systemImage: "gamecontroller.fill") }
+            ActionsView(ble: ble)
+                .tabItem { Label("Actions", systemImage: "square.grid.2x2.fill") }
         }
         .preferredColorScheme(.dark)
     }
@@ -496,34 +539,14 @@ struct ContentView: View {
 struct DashboardView: View {
     @ObservedObject var ble: BLEManager
     @State private var statusPoll: Timer?
-    @State private var showAllControls = false
-
-    // pressing a Feelings button shows that mood on the face for a while,
-    // so the app face reacts instantly instead of waiting for telemetry
-    @State private var moodOverride: AlbertMood?
-    @State private var overrideToken = UUID()
 
     // big text captions mirrored on the face card during text shows
     @State private var caption: String?
     @State private var captionTimer: Timer?
 
-    @State private var showResetConfirm = false
-
-    private var mood: AlbertMood { moodOverride ?? AlbertMood.from(ble.stats) }
-
-    /// Send a feeling command and mirror it on the app face immediately.
-    private func sendFeeling(_ cmd: String, as m: AlbertMood?) {
-        ble.send(cmd)
-        guard let m = m else { return }
-        let token = UUID()
-        overrideToken = token
-        withAnimation(.easeInOut(duration: 0.3)) { moodOverride = m }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
-            if overrideToken == token {
-                withAnimation(.easeInOut(duration: 0.5)) { moodOverride = nil }
-            }
-        }
-    }
+    // Feelings buttons (and their instant mood-override trick) live in
+    // the Actions tab now — the dashboard face just mirrors telemetry.
+    private var mood: AlbertMood { AlbertMood.from(ble.stats) }
 
     /// Flash a word sequence over the face card (mirrors the OLED banners).
     private func playCaption(_ words: [String], step: Double = 0.55, repeats: Int = 1) {
@@ -554,29 +577,19 @@ struct DashboardView: View {
                 .ignoresSafeArea()
                 .animation(.easeInOut(duration: 0.8), value: mood)
 
-            ScrollView {
+            ScrollView(showsIndicators: false) {
                 VStack(spacing: 20) {
                     header
                     facePanel
                     if ble.isConnected {
                         moodPanel
+                        autoPanel
                         showsPanel
                         movementPanel
-                        DisclosureGroup(isExpanded: $showAllControls) {
-                            VStack(spacing: 18) {
-                                posesPanel
-                                tricksPanel
-                                dancesPanel
-                                expressionsPanel
-                                systemPanel
-                            }
-                            .padding(.top, 12)
-                        } label: {
-                            Text(showAllControls ? "Hide extra controls" : "More poses, tricks, dances & faces")
-                                .font(.system(size: 14, weight: .bold, design: .rounded))
-                                .foregroundColor(mood.accent)
-                        }
-                        .padding(.horizontal, 4)
+                        Text("Tricks, dances & feelings live in the Actions tab")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundColor(AlbertPalette.subtle)
+                            .padding(.bottom, 4)
                     } else {
                         connectPanel
                     }
@@ -587,13 +600,21 @@ struct DashboardView: View {
         .onChange(of: ble.isConnected) { connected in
             if connected { startStatusPolling() } else { statusPoll?.invalidate() }
         }
-        .alert("Reset Albert's memory?", isPresented: $showResetConfirm) {
-            Button("Reset", role: .destructive) { ble.send("RESET") }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This wipes his happiness, bonding and lifetime pets back to zero. He won't remember you!")
-        }
         .preferredColorScheme(.dark)
+    }
+
+    // pretty name for the firmware's activity strings
+    private func activityLabel(_ raw: String) -> String {
+        switch raw {
+        case "chill":          return "Chilling"
+        case "explore":        return "Exploring"
+        case "play":           return "Playing"
+        case "seek-attention": return "Wants attention"
+        case "groom":          return "Grooming"
+        case "zoomies!":       return "ZOOMIES!"
+        case "show-off":       return "Showing off"
+        default:               return raw
+        }
     }
 
     // ---- header ----
@@ -603,16 +624,33 @@ struct DashboardView: View {
                 Text("Albert")
                     .font(.system(size: 30, weight: .black, design: .rounded))
                     .foregroundColor(.white)
-                Text(ble.isConnected ? mood.label : ble.statusText)
+                // mood + live autopilot activity in one line
+                Text(headerSubtitle)
                     .font(.system(size: 13, weight: .medium, design: .rounded))
                     .foregroundColor(mood.accent)
             }
             Spacer()
-            Circle()
-                .fill(ble.isConnected ? Color.green : Color.gray)
-                .frame(width: 12, height: 12)
-                .shadow(color: ble.isConnected ? .green : .clear, radius: 6)
+            // connection pill — clearer than a bare dot
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(ble.isConnected ? Color.green : Color.gray)
+                    .frame(width: 8, height: 8)
+                Text(ble.isConnected ? "Online" : "Offline")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundColor(ble.isConnected ? .green : AlbertPalette.subtle)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(Color.white.opacity(0.07)))
         }
+    }
+
+    private var headerSubtitle: String {
+        guard ble.isConnected else { return ble.statusText }
+        if let act = ble.stats?.activity, !act.isEmpty {
+            return "\(mood.label) · \(activityLabel(act))"
+        }
+        return mood.label
     }
 
     // ---- the animated face card ----
@@ -708,6 +746,13 @@ struct DashboardView: View {
                 }
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .foregroundColor(AlbertPalette.subtle)
+                // the last thing Albert said over BLE ("<3", "grr", "yawn"...)
+                if !ble.lastMessage.isEmpty && !ble.lastMessage.contains("H:") {
+                    Label(ble.lastMessage, systemImage: "quote.bubble.fill")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundColor(mood.accent)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             } else {
                 Text("Reading Albert's mood…")
                     .font(.system(size: 13, design: .rounded))
@@ -718,6 +763,59 @@ struct DashboardView: View {
         .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(AlbertPalette.card))
     }
 
+    // ---- Autopilot: free roam or lock him into one activity ----
+    private var autoPanel: some View {
+        VStack(spacing: 10) {
+            SectionLabel(text: "Autopilot")
+            CmdButton(title: "FREE ROAM", icon: "wand.and.stars",
+                      tint: mood.accent.opacity(0.75), big: true) {
+                ble.send("AUTO")
+            }
+            let acts: [(label: String, cmd: String, match: String, icon: String)] = [
+                ("Chill",    "AUTO CHILL",   "chill",          "leaf.fill"),
+                ("Explore",  "AUTO EXPLORE", "explore",        "binoculars.fill"),
+                ("Play",     "AUTO PLAY",    "play",           "figure.play"),
+                ("Cuddle",   "AUTO SEEK",    "seek-attention", "heart.fill"),
+                ("Groom",    "AUTO GROOM",   "groom",          "comb.fill"),
+                ("Zoomies",  "AUTO ZOOM",    "zoomies!",       "bolt.fill"),
+                ("Show off", "AUTO SHOW",    "show-off",       "star.fill"),
+            ]
+            let cols = Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
+            LazyVGrid(columns: cols, spacing: 8) {
+                ForEach(acts, id: \.cmd) { a in
+                    let active = ble.stats?.activity == a.match
+                    Button {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        ble.send(a.cmd)
+                    } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: a.icon)
+                                .font(.system(size: 15, weight: .semibold))
+                            Text(a.label)
+                                .font(.system(size: 10, weight: .bold, design: .rounded))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(active ? mood.accent.opacity(0.55)
+                                             : AlbertPalette.cardHi)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(active ? mood.accent : .clear, lineWidth: 1.5)
+                        )
+                        .foregroundColor(.white)
+                    }
+                    .buttonStyle(SquishStyle())
+                }
+            }
+            Text("Pick one to lock him into that activity — Free Roam lets him choose")
+                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .foregroundColor(AlbertPalette.subtle)
+        }
+    }
+
     // ---- SHOWS (the star feature) ----
     private var showsPanel: some View {
         VStack(spacing: 10) {
@@ -726,7 +824,7 @@ struct DashboardView: View {
                 CmdButton(title: "INTRO", icon: "hand.wave.fill",
                           tint: mood.accent.opacity(0.85), big: true) {
                     ble.send("INTRO")
-                    playCaption(["HI", "AKU", "ALBERT"], step: 0.7, repeats: 2)
+                    playCaption(["HI!", "I'M", "ALBERTO"], step: 0.7, repeats: 2)
                 }
                 CmdButton(title: "5G GACOR", icon: "bolt.fill",
                           tint: AlbertMood.excited.accent.opacity(0.85), big: true) {
@@ -757,70 +855,31 @@ struct DashboardView: View {
         }
     }
 
-    private var posesPanel: some View {
-        VStack(spacing: 10) {
-            SectionLabel(text: "Poses")
-            CmdGrid(commands: [
-                ("UP","arrow.up.to.line"),
-                ("SIT","chair"),
-                ("LIE","bed.double"),
-                ("LAYDOWN","rectangle.compress.vertical"),
-                ("REST","powersleep"),
-                ("SLEEP","moon.fill"),
-            ], send: { ble.send($0) })
+    // poll STATUS so the on-screen face keeps mirroring the robot
+    private func startStatusPolling() {
+        statusPoll?.invalidate()
+        ble.requestStatus()
+        statusPoll = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { _ in
+            ble.requestStatus()
         }
     }
+}
 
-    private var tricksPanel: some View {
-        VStack(spacing: 10) {
-            SectionLabel(text: "Tricks")
-            CmdGrid(commands: [
-                ("PUSHUPS","figure.strengthtraining.traditional"),
-                ("STRETCH","figure.flexibility"),
-                ("WAVE","hand.wave"),
-                ("BOW","figure.bowling"),
-                ("BEG","pawprint"),
-                ("SPINPOSE","arrow.triangle.2.circlepath"),
-                ("SHAKE","waveform"),
-                ("GALLOP","hare.fill"),
-                ("BOUNCE","arrow.up.arrow.down"),
-                ("PLAYDEAD","theatermasks"),
-                ("SNEEZE","wind"),
-                ("KISS","heart.circle.fill"),
-                ("ZOOMIES","bolt.fill"),
-                ("SHY","eye.slash"),
-                ("SULK","cloud.fill"),
-                ("TANTRUM","exclamationmark.2"),
-                ("YES","checkmark"),
-                ("NO","xmark"),
-            ], send: { ble.send($0) })
-        }
-    }
+// =====================================================================
+// MARK: - ActionsView (the full command library, organised by category)
+// =====================================================================
+struct ActionsView: View {
+    @ObservedObject var ble: BLEManager
+    @State private var category = 0
+    @State private var moodOverride: AlbertMood?
+    @State private var overrideToken = UUID()
+    @State private var showResetConfirm = false
 
-    private var dancesPanel: some View {
-        VStack(spacing: 10) {
-            SectionLabel(text: "Dances")
-            CmdGrid(commands: [
-                ("DANCE","music.note"),
-                ("MOONWALK","figure.walk"),
-                ("CHACHA","music.quarternote.3"),
-                ("HEADBANG","guitars"),
-                ("BREAKDANCE","figure.dance"),
-                ("ROBOT","cpu"),
-                ("DISCO","rays"),
-                ("BALLET","moon.stars"),
-                ("STOMP","figure.stairs"),
-                ("SALUTE","hand.raised"),
-                ("PEEKABOO","eye"),
-                ("POUNCE","hare"),
-                ("TWIST","tornado"),
-                ("WIGGLE","scribble.variable"),
-                ("SWING","metronome"),
-            ], send: { ble.send($0) })
-        }
-    }
+    private var mood: AlbertMood { moodOverride ?? AlbertMood.from(ble.stats) }
 
-    // feelings carry a mood so the app face mirrors the button instantly
+    private let categories = ["Poses", "Tricks", "Dances", "Feelings", "System"]
+
+    // feelings carry a mood so the mini face mirrors the button instantly
     private let feelings: [(cmd: String, icon: String, mood: AlbertMood?)] = [
         ("HAPPY",     "face.smiling",          .happy),
         ("LOVE",      "heart.fill",            .love),
@@ -833,50 +892,169 @@ struct DashboardView: View {
         ("SURPRISED", "exclamationmark",       .surprised),
         ("SLEEPY",    "moon.zzz.fill",         .sleepy),
         ("SUS",       "eyes",                  .suspicious),
+        ("EXCITED",   "bolt.heart.fill",       .excited),
+        ("BORED",     "zzz",                   .bored),
+        ("DIZZY",     "arrow.triangle.2.circlepath.circle", .dizzy),
+        ("PROUD",     "crown.fill",            .proud),
         ("NERVOUS",   "waveform.path.ecg",     nil),
         ("LAUGH",     "face.smiling.inverse",  .happy),
         ("CONFUSED",  "questionmark",          nil),
         ("WINK",      "eye.fill",              nil),
     ]
 
-    private var expressionsPanel: some View {
-        VStack(spacing: 10) {
-            SectionLabel(text: "Feelings")
-            let cols = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
-            LazyVGrid(columns: cols, spacing: 8) {
-                ForEach(feelings, id: \.0) { f in
-                    CmdButton(title: f.cmd, icon: f.icon) {
-                        sendFeeling(f.cmd, as: f.mood)
+    var body: some View {
+        ZStack {
+            LinearGradient(colors: [AlbertPalette.bg, AlbertPalette.bg2],
+                           startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea()
+
+            VStack(spacing: 14) {
+                // compact live face so feelings give instant feedback here too
+                ZStack {
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(AlbertPalette.faceBg)
+                        .frame(height: 110)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                .stroke(mood.accent.opacity(0.4), lineWidth: 1.5)
+                        )
+                    RoboEyesView(mood: mood, isConnected: ble.isConnected)
+                        .scaleEffect(0.45)
+                        .frame(height: 110)
+                        .clipped()
+                }
+                .overlay(alignment: .topLeading) {
+                    if mood == .grumpy || mood == .furious {
+                        AngerBadge(size: 18, color: mood.accent).padding(10)
                     }
+                }
+
+                Picker("Category", selection: $category) {
+                    ForEach(0..<categories.count, id: \.self) { i in
+                        Text(categories[i]).tag(i)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 14) {
+                        switch category {
+                        case 0: posesGrid
+                        case 1: tricksGrid
+                        case 2: dancesGrid
+                        case 3: feelingsGrid
+                        default: systemGrid
+                        }
+                    }
+                    .padding(.top, 4)
+                }
+            }
+            .padding(20)
+        }
+        .alert("Reset Albert's memory?", isPresented: $showResetConfirm) {
+            Button("Reset", role: .destructive) { ble.send("RESET") }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This wipes his happiness, bonding and lifetime pets back to zero. He won't remember you!")
+        }
+    }
+
+    private func sendFeeling(_ cmd: String, as m: AlbertMood?) {
+        ble.send(cmd)
+        guard let m = m else { return }
+        let token = UUID()
+        overrideToken = token
+        withAnimation(.easeInOut(duration: 0.3)) { moodOverride = m }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
+            if overrideToken == token {
+                withAnimation(.easeInOut(duration: 0.5)) { moodOverride = nil }
+            }
+        }
+    }
+
+    private var posesGrid: some View {
+        CmdGrid(commands: [
+            ("UP","arrow.up.to.line"),
+            ("SIT","chair"),
+            ("LIE","bed.double"),
+            ("LAYDOWN","rectangle.compress.vertical"),
+            ("REST","powersleep"),
+            ("SLEEP","moon.fill"),
+        ], send: { ble.send($0) },
+           tint: AlbertMood.neutral.accent.opacity(0.28))
+    }
+
+    private var tricksGrid: some View {
+        CmdGrid(commands: [
+            ("PUSHUPS","figure.strengthtraining.traditional"),
+            ("STRETCH","figure.flexibility"),
+            ("WAVE","hand.wave"),
+            ("BOW","figure.bowling"),
+            ("BEG","pawprint"),
+            ("SPINPOSE","arrow.triangle.2.circlepath"),
+            ("SHAKE","waveform"),
+            ("GALLOP","hare.fill"),
+            ("BOUNCE","arrow.up.arrow.down"),
+            ("PLAYDEAD","theatermasks"),
+            ("SNEEZE","wind"),
+            ("KISS","heart.circle.fill"),
+            ("ZOOMIES","bolt.fill"),
+            ("SHY","eye.slash"),
+            ("SULK","cloud.fill"),
+            ("TANTRUM","exclamationmark.2"),
+            ("YES","checkmark"),
+            ("NO","xmark"),
+        ], send: { ble.send($0) },
+           tint: AlbertMood.happy.accent.opacity(0.24))
+    }
+
+    private var dancesGrid: some View {
+        CmdGrid(commands: [
+            ("DANCE","music.note"),
+            ("MOONWALK","figure.walk"),
+            ("CHACHA","music.quarternote.3"),
+            ("HEADBANG","guitars"),
+            ("BREAKDANCE","figure.dance"),
+            ("ROBOT","cpu"),
+            ("DISCO","rays"),
+            ("BALLET","moon.stars"),
+            ("STOMP","figure.stairs"),
+            ("SALUTE","hand.raised"),
+            ("PEEKABOO","eye"),
+            ("POUNCE","hare"),
+            ("TWIST","tornado"),
+            ("WIGGLE","scribble.variable"),
+            ("SWING","metronome"),
+        ], send: { ble.send($0) },
+           tint: AlbertMood.dizzy.accent.opacity(0.24))
+    }
+
+    private var feelingsGrid: some View {
+        let cols = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
+        return LazyVGrid(columns: cols, spacing: 8) {
+            ForEach(feelings, id: \.0) { f in
+                CmdButton(title: f.cmd, icon: f.icon,
+                          tint: AlbertMood.love.accent.opacity(0.22)) {
+                    sendFeeling(f.cmd, as: f.mood)
                 }
             }
         }
     }
 
-    private var systemPanel: some View {
-        VStack(spacing: 10) {
-            SectionLabel(text: "System")
+    private var systemGrid: some View {
+        VStack(spacing: 8) {
             HStack(spacing: 8) {
                 CmdButton(title: "AUTO", icon: "wand.and.stars") { ble.send("AUTO") }
                 CmdButton(title: "SLEEP", icon: "moon.fill") { ble.send("SLEEP") }
-                CmdButton(title: "UP", icon: "arrow.up.to.line") { ble.send("UP") }
+                CmdButton(title: "STATS", icon: "chart.bar.fill") { ble.send("STATS") }
             }
             HStack(spacing: 8) {
-                CmdButton(title: "STATS", icon: "chart.bar.fill") { ble.send("STATS") }
+                CmdButton(title: "SAVE", icon: "internaldrive") { ble.send("SAVE") }
                 CmdButton(title: "RESET", icon: "arrow.counterclockwise.circle",
                           tint: Color.orange.opacity(0.4)) { showResetConfirm = true }
                 CmdButton(title: "Disconnect", icon: "xmark.circle",
                           tint: Color.red.opacity(0.3)) { ble.disconnect() }
             }
-        }
-    }
-
-    // poll STATUS so the on-screen face keeps mirroring the robot
-    private func startStatusPolling() {
-        statusPoll?.invalidate()
-        ble.requestStatus()
-        statusPoll = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { _ in
-            ble.requestStatus()
         }
     }
 }
@@ -1039,13 +1217,14 @@ struct EmotionDiamond: View {
             .overlay(Circle().stroke(item.color.opacity(0.8), lineWidth: 2))
             .foregroundColor(.white)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SquishStyle())
     }
 }
 
 struct ControllerView: View {
     @ObservedObject var ble: BLEManager
     @State private var bank = 0
+    @State private var driveCmd: String?
 
     private var mood: AlbertMood { AlbertMood.from(ble.stats) }
 
@@ -1064,8 +1243,12 @@ struct ControllerView: View {
          ("SAD",       "cloud.rain",         AlbertMood.sad.accent),
          ("SLEEPY",    "moon.zzz.fill",      AlbertMood.sleepy.accent),
          ("SUS",       "eyes",               AlbertMood.suspicious.accent)],
+        [("EXCITED",   "bolt.heart.fill",    AlbertMood.excited.accent),
+         ("DIZZY",     "arrow.triangle.2.circlepath.circle", AlbertMood.dizzy.accent),
+         ("BORED",     "zzz",                AlbertMood.bored.accent),
+         ("PROUD",     "crown.fill",         AlbertMood.proud.accent)],
     ]
-    private let bankNames = ["Sunny", "Grumpy", "Drama"]
+    private let bankNames = ["Sunny", "Grumpy", "Drama", "Extra"]
 
     var body: some View {
         ZStack {
@@ -1103,42 +1286,78 @@ struct ControllerView: View {
                     }
                     Spacer()
                 } else {
-                    // shoulder buttons: hold to spin
-                    HStack(spacing: 12) {
-                        HoldButton(title: "SPIN L", icon: "arrow.counterclockwise",
-                                   command: "SL", send: { ble.send($0) })
-                        HoldButton(title: "SPIN R", icon: "arrow.clockwise",
-                                   command: "SR", send: { ble.send($0) })
-                    }
+                    ScrollView(showsIndicators: false) {
+                        VStack(spacing: 16) {
+                            // shoulder buttons: hold to spin
+                            HStack(spacing: 12) {
+                                HoldButton(title: "SPIN L", icon: "arrow.counterclockwise",
+                                           command: "SL", send: { ble.send($0) })
+                                HoldButton(title: "SPIN R", icon: "arrow.clockwise",
+                                           command: "SR", send: { ble.send($0) })
+                            }
 
-                    Spacer()
+                            // the main deck: stick drives, diamond emotes
+                            HStack(alignment: .center) {
+                                VStack(spacing: 8) {
+                                    JoystickPad { zone in
+                                        driveCmd = zone
+                                        ble.send(zone ?? "STOP")
+                                    }
+                                    // live readout of what the stick is sending
+                                    Text(driveCmd ?? "idle")
+                                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                                        .foregroundColor(driveCmd == nil
+                                            ? AlbertPalette.subtle : mood.accent)
+                                        .animation(.easeInOut(duration: 0.15), value: driveCmd)
+                                }
+                                Spacer(minLength: 12)
+                                EmotionDiamond(items: banks[bank], send: { ble.send($0) })
+                            }
+                            .padding(.vertical, 6)
 
-                    // the main deck: stick drives, diamond emotes
-                    HStack(alignment: .center) {
-                        JoystickPad { zone in
-                            ble.send(zone ?? "STOP")
-                        }
-                        Spacer(minLength: 12)
-                        EmotionDiamond(items: banks[bank], send: { ble.send($0) })
-                    }
+                            // emotion switch between the banks
+                            Picker("Mood set", selection: $bank) {
+                                ForEach(0..<bankNames.count, id: \.self) { i in
+                                    Text(bankNames[i]).tag(i)
+                                }
+                            }
+                            .pickerStyle(.segmented)
 
-                    // emotion switch between the banks
-                    Picker("Mood set", selection: $bank) {
-                        ForEach(0..<3, id: \.self) { i in
-                            Text(bankNames[i]).tag(i)
-                        }
-                    }
-                    .pickerStyle(.segmented)
+                            // utility row
+                            HStack(spacing: 8) {
+                                CmdButton(title: "STAND", icon: "arrow.up.to.line") { ble.send("UP") }
+                                CmdButton(title: "SIT", icon: "chair") { ble.send("SIT") }
+                                CmdButton(title: "STOP", icon: "stop.fill",
+                                          tint: Color(red: 0.9, green: 0.35, blue: 0.35).opacity(0.8)) {
+                                    ble.send("STOP")
+                                }
+                            }
 
-                    Spacer()
+                            // quick tricks — one tap, no page switching
+                            SectionLabel(text: "Tricks")
+                            CmdGrid(commands: [
+                                ("WAVE","hand.wave"),
+                                ("LAYDOWN","rectangle.compress.vertical"),
+                                ("PLAYDEAD","theatermasks"),
+                                ("SNEEZE","wind"),
+                                ("SHAKE","waveform"),
+                                ("ZOOMIES","bolt.fill"),
+                                ("TANTRUM","exclamationmark.2"),
+                                ("YES","checkmark"),
+                                ("NO","xmark"),
+                                ("BOUNCE","arrow.up.arrow.down"),
+                                ("BEG","pawprint"),
+                            ], send: { ble.send($0) })
 
-                    // utility row
-                    HStack(spacing: 8) {
-                        CmdButton(title: "STAND", icon: "arrow.up.to.line") { ble.send("UP") }
-                        CmdButton(title: "SIT", icon: "chair") { ble.send("SIT") }
-                        CmdButton(title: "STOP", icon: "stop.fill",
-                                  tint: Color(red: 0.9, green: 0.35, blue: 0.35).opacity(0.8)) {
-                            ble.send("STOP")
+                            // quick dances
+                            SectionLabel(text: "Dances")
+                            CmdGrid(commands: [
+                                ("ROBOT","cpu"),
+                                ("SALUTE","hand.raised"),
+                                ("WIGGLE","scribble.variable"),
+                                ("STOMP","figure.stairs"),
+                                ("CHACHA","music.quarternote.3"),
+                            ], send: { ble.send($0) })
                         }
                     }
                 }
