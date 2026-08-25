@@ -80,6 +80,8 @@ The app has three pages, switched with the tab bar at the bottom. If the
 Bluetooth link drops (robot rebooted, walked out of range), the app quietly
 rescans and reconnects by itself.
 
+For the cross-platform wire contract, see [docs/ble-protocol.md](docs/ble-protocol.md).
+
 ### Albert tab — the dashboard
 
 This is the "living with Albert" page. The big card is his face, mirrored live
