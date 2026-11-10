@@ -464,6 +464,6 @@ He introduces himself as **ALBERTO**, performs a roll call for **GUNG**, **MAYUN
 
 <div align="center">
 
-Built with ❤️ using **ESP32-C3**, **Arduino**, and **SwiftUI** by [@gungfebrian](https://github.com/gungfebrian)
+Built by [@gungfebrian](https://github.com/gungfebrian)
 
 </div>
